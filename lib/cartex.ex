@@ -42,12 +42,12 @@ defmodule Cartex do
       version: "0.17",
       author: "Zeio Nara zeionara@gmail.com",
       about: "The tool is intended to be used in applications heavy relying on knowledge base data sources or which implement some algorithms of data structure analysis. The tool allows to broaden the range of datasets which may be explored automatically using popular knowledge base engines.",
-      allow_unknown_args: false,
       parse_double_dash: true,
       subcommands: [
         make_meta_query: [
           name: "make-meta-query",
           about: "Generate SPARQL query which can be used for generating a query for processing a subset of cartesian product entries",
+          allow_unknown_args: true,
           options: [
             offset: [
               value_name: "OFFSET",
@@ -63,7 +63,7 @@ defmodule Cartex do
               help: "Number of elements which should be processed during generated queries execution",
               required: false,
               parser: parse_integer(min: 1, description: "batch size"), # :integer,
-              default: "{{offset}}",
+              default: "{{limit}}",
               short: "-b",
               long: "--limit"
             ],
@@ -96,6 +96,23 @@ defmodule Cartex do
               short: "-k",
               long: "--kind",
               default: :negative_composition
+            ],
+            core: [
+              value_name: "CORE",
+              help: "The main part of the query without auxiliary structures",
+              required: false,
+              parser: :string,
+              default: "?h ?premise ?t. ?t ?statement ?n. filter(!exists{?h ?conclusion ?n})",
+              short: "-c",
+              long: "--core"
+            ],
+            output: [
+              value_name: "OUTPUT",
+              help: "Path to local file for writing the generated query",
+              required: false,
+              parser: :string,
+              short: "-o",
+              long: "--output"
             ]
           ]
         ]
@@ -106,8 +123,8 @@ defmodule Cartex do
       end
   end
 
-  def make_meta_query(%Optimus.ParseResult{options: %{limit: limit, offset: offset, n: n}}) do
-    """
+  def make_meta_query(%Optimus.ParseResult{options: %{limit: limit, offset: offset, n: n, core: core, output: output}, unknown: names}) do
+    query = """
     select ?query {
       {
         select (count(distinct ?relation) as ?n_relations) where {
@@ -129,19 +146,29 @@ defmodule Cartex do
           if(
             ?offset_0 >= #{for _ <- 1..n do "?n_relations" end |> Enum.join(" * ")},
             concat("ERROR: Stop iteration when generating query with offset ", str(?offset_0)),
-            #{Cartex.make_trivial_handlers(n, ["premise", "statement", "conclusion"], 17, 3)}
+            #{Cartex.make_handlers(n, (if length(names) < 1, do: ["premise", "statement", "conclusion"], else: names), core)}
           )
         ) as ?query
       )
     }
-    """ |> IO.puts # TODO: Eliminate redundant arguments from the make_trivial_handlers call above
+    """ # |> IO.puts # TODO: Eliminate redundant arguments from the make_trivial_handlers call above
+
+    case output do
+      nil -> IO.puts(query)
+      _ -> case File.open(output, [:write]) do
+        {:ok, file} -> 
+          IO.binwrite(file, query)
+          File.close(file)
+        {:error, error} -> raise "Cannot open file #{output} for writing: #{error}"
+      end
+    end
   end
 
   # @spec make_trivial_handlers_query(integer, list, list, integer, integer, integer) :: Map
-  def make_trivial_handlers_query(n, names, _, tail, distance) do
+  def make_trivial_handlers_query(n, names, distance) do
     joined_queries = for {name, i} <- Enum.with_index(names, 1) do
       case i do
-        ^n -> %{offset: nil, limit: tail, name: name} |> query_to_string(is_tail_limit: true) # "limit #{tail}"
+        ^n -> %{offset: nil, limit: i, name: name} |> query_to_string(is_tail_limit: true) # "limit #{tail}"
         _ -> 
           cond do
             n - i > distance -> %{offset: i, limit: 1, name: name} |> query_to_string(is_numerical_limit: true) # "offset #{offset} limit 1"
@@ -156,20 +183,23 @@ defmodule Cartex do
   end
 
   # @spec make_trivial_handlers(integer, list, list, integer, integer, integer) :: Map
-  def make_trivial_handlers(n, names, head, tail, distance) when n - distance > 1 do
+  def make_trivial_handlers(n, names, distance) when n - distance > 1 do
     # ["if(", Enum.at(offsets, n - distance - 1), " + 1 < n"] ++ make_trivial_handlers_query(n, offsets, names, head, tail, distance) ++ ["else"] ++ make_trivial_handlers(n, offsets, names, head, tail, distance + 1)
-    "if(?offset_#{n - distance} + 1 < ?n_relations, #{make_trivial_handlers_query(n, names, head, tail, distance)}, #{make_trivial_handlers(n, names, head, tail, distance + 1)})"
+    "if(?offset_#{n - distance} + 1 < ?n_relations, #{make_trivial_handlers_query(n, names, distance)}, #{make_trivial_handlers(n, names, distance + 1)})"
   end
 
   # @spec make_trivial_handlers(integer, list, list, integer, integer, integer) :: Map
-  def make_trivial_handlers(n, names, head, tail, distance) do
-    make_trivial_handlers_query(n, names, head, tail, distance)
+  def make_trivial_handlers(n, names, distance) do
+    make_trivial_handlers_query(n, names, distance)
   end
 
   # @spec make_trivial_handlers(integer, list, list, integer, integer) :: Map
-  def make_trivial_handlers(n, names, head, tail) do
-    prefix = "select (count(*) as ?count) ?premise ?statement ?conclusion with { select distinct ?relation where { [] ?relation [] } order by ?relation } as %relations with { select ?premise ?statement ?conclusion { "
-    suffix = " } as %relations_ where { include %relations_  ?h ?premise ?t. ?t ?statement ?n. filter(!exists{?h ?conclusion ?n}) } group by ?premise ?statement ?conclusion order by desc(?count)"
+  def make_handlers(n, names, core) do
+    list_of_names_in_select_header = for name <- names do "?#{name}" end |> Enum.join(" ")
+
+    prefix = "select (count(*) as ?count) #{list_of_names_in_select_header} " <> 
+      "with { select distinct ?relation where { [] ?relation [] } order by ?relation } as %relations with { select #{list_of_names_in_select_header} { "
+    suffix = " } as %relations_ where { include %relations_  #{core} } group by #{list_of_names_in_select_header} order by desc(?count)"
 
     first_query = for {name, i} <- Enum.with_index(names, 1) do
       case i do
@@ -179,7 +209,7 @@ defmodule Cartex do
     end
     |> join_queries
 
-    second_query = make_trivial_handlers(n, names, head, tail, 1)
+    second_query = make_trivial_handlers(n, names, 1)
 
     """
     concat("#{prefix}", #{join_queries([first_query, second_query], ", \" union \" ,")}, " } ", "#{suffix}")

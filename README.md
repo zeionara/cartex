@@ -35,10 +35,10 @@ mix escript.build
 The only way to use the application is via its command-line interface. Currently only generation of metaqueries is supported, which can be initiated with the following call:
 
 ```sh
-./cartex make-meta-query -n 3
+./cartex make-meta-query -n 3 foo bar baz -c '?h ?foo ?t. ?t ?bar ?n. filter(!exists{?h ?baz ?n})' -s 16 -b 8 -o foo.txt
 ```
 
-The generated metaquery is printed right into the terminal, from where it should be manually transferred to a desired destination.
+The generated metaquery is being written to the `foo.txt` file, but in case `-o` option would have been omitted, the query would be written directly to the console.
 
 For more information about the app please, use appropriate `help` options:
 
