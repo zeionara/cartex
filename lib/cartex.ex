@@ -139,13 +139,45 @@ defmodule Cartex do
     end
   end
 
-  def join_queries(queries, sep \\ " ") do
+  def join_queries(queries, sep \\ ", ") do
     for query <- queries do
       """
-      " { ", #{query} " } "
+      " { ", #{query}, " } "
       """ |> String.replace("\n", "")
     end
     |> Enum.join(sep)
+  end
+
+  def make_mod(dividend, divisor, result, opts \\ []) do
+    quotient = Keyword.get(opts, :quotient, "#{result}_quotient")
+
+    """
+    bind(floor(?#{dividend} / ?#{divisor}) as ?#{quotient}) 
+    bind(?#{dividend} - ?#{quotient} * ?#{divisor} as ?#{result})
+    """ |> String.replace("\n", "")
+  end
+
+  def split_offset(n) do
+    # """
+    # bind(floor(?#{offset_number_to_offset(0)} / ?n_relations) as ?#{offset_number_to_offset(n)}_remainder)
+    # """
+    
+    for i <- n..2 do
+      """
+      #{
+        make_mod(
+          (
+            if i == n, do: offset_number_to_offset(0), else: "#{offset_number_to_offset(i + 1)}_quotient"
+          ),
+          "n_relations",
+          offset_number_to_offset(i),
+          quotient: (
+            if i > 2, do: "#{offset_number_to_offset(i)}_quotient", else: offset_number_to_offset(i - 1)
+          )
+        )
+      }
+      """ |> String.replace("\n", "")
+    end |> Enum.join(" ")
   end
 end
 
