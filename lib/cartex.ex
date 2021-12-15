@@ -64,35 +64,109 @@ defmodule Cartex do
     |> Enum.join(" ")
   end
 
-  def make_incremental_query(n, m, k, names) do
-    for {name, i} <- Enum.with_index(names, 1) do
-      cond do
-        # i == n - m - 1 -> %{offset: i, limit: 1, name: name} # + 1
-        i < n - m && i > n - k -> %{offset: nil, limit: 1, name: name}
-        i == n - m -> %{offset: nil, limit: i, name: name} # tail limit
-        i == n - k -> %{offset: i, limit: 1, name: name} # + 1
-        i > n - m -> %{offset: nil, limit: nil, name: name}
-        true -> %{offset: i, limit: i, name: name}
+  def flatten_one_dimension(list) do
+    case list do
+      [] -> []
+      [head | tail] -> head ++ flatten_one_dimension(tail)
+    end
+  end
+
+  def check_next_query_pair(pairs, _found_pair) when pairs == [] do
+    pairs
+  end
+
+  def check_next_query_pair(pairs, found_pair) do
+    [{subquery, next} | tail] = pairs
+
+    case {subquery, next} do
+      {[offset: nil, limit: [value: limit_value, kind: :tail], name: subquery_name], [offset: nil, limit: nil, name: next_name]} ->
+        # IO.inspect {subquery, next}
+        [
+          [offset: [value: "#{limit_number_to_limit(limit_value, kind: :tail)}", raw: true], limit: [value: 1, raw: true], name: subquery_name],
+          [offset: nil, limit: [value: limit_value + 1, kind: :tail], name: next_name]
+        ] ++ check_next_query_pair(tail, true)
+      _ -> case found_pair do
+        false ->
+          case subquery do
+            nil -> check_next_query_pair(tail, found_pair)
+            _ -> [subquery] ++ check_next_query_pair(tail, found_pair)
+          end
+        true -> 
+          case next do
+            nil -> check_next_query_pair(tail, found_pair)
+            _ -> [next] ++ check_next_query_pair(tail, found_pair)
+          end
       end
     end
   end
 
-  def make_increment(n, m, k, names) when n - k > 1 do
-    # [
-    #   :if,
-    #   "#{offset_number_to_offset(n - m - 1)} + 1 < ?n_relations",
-    #   for {name, i} <- Enum.with_index(names, 1) do
-    #     cond do
-    #       i == n - m - 1 -> %{offset: i, limit: 1, name: name} # + 1
-    #       i == n - m -> %{offset: nil, limit: i, name: name} # tail limit
-    #       i > n - m -> %{offset: nil, limit: nil, name: name}
-    #       true -> %{offset: i, limit: i, name: name}
-    #     end
+  def make_subsequent_query(base) do
+    # pairs = for {subquery, next} <- Enum.zip([nil | base], base) do
+    #   case {subquery, next} do
+    #     {[offset: nil, limit: [value: limit_value, kind: :tail], name: subquery_name], [offset: nil, limit: nil, name: next_name]} ->
+    #       # IO.inspect {subquery, next}
+    #       {
+    #         [offset: [value: "#{limit_number_to_limit(limit_value, kind: :tail)}", raw: true], limit: [value: 1, raw: true], name: subquery_name],
+    #         [offset: nil, limit: [value: limit_value + 1, kind: :tail], name: next_name]
+    #       }
+    #     _ -> {subquery, next} # IO.inspect {subquery, next}
     #   end
-    # ]
+    # end
+
+    check_next_query_pair(Enum.zip([nil | base], base ++ [nil]), false)
+
+    # flattened_pairs = pairs |> Enum.map(&Tuple.to_list/1) |> flatten_one_dimension |> List.delete_at(0)
+    # [_ | tail] = flattened_pairs
+
+    # for {lhs, rhs} <- Enum.zip(flattened_pairs, tail ++ [nil]) do
+    #   case {lhs, rhs} do
+    #     {last_item, nil} -> [last_item]
+    #     _ ->
+    #       cond do
+    #         lhs == rhs -> [lhs]
+    #         true -> [lhs, rhs]
+    #       end
+    #   end
+    # end |> IO.inspect
+  end
+
+  def make_subsequent_queries(query) do
+    subsequent_query = make_subsequent_query(query)
+
+    cond do
+      subsequent_query == query -> [] 
+      true -> 
+        # IO.puts "One subsequent query"
+        # IO.inspect subsequent_query
+        
+        [subsequent_query | make_subsequent_queries(subsequent_query)]
+    end
+  end
+
+  def make_incremental_query(n, m, k, names) do
+    query = for {name, i} <- Enum.with_index(names, 1) do
+      cond do
+        i < n - m && i > n - k -> [offset: nil, limit: [value: 1, raw: true], name: name]
+        i == n - m -> [offset: nil, limit: [value: i, kind: :tail], name: name]
+        i == n - k -> [offset: [value: i, suffix: " + 1"], limit: [value: 1, raw: true], name: name]
+        i > n - m -> [offset: nil, limit: nil, name: name]
+        true -> [offset: [value: i], limit: [value: i], name: name]
+      end
+    end
+
+    # IO.puts "Incremental query (n - m = #{n - m})"
+    # IO.inspect query
+
+    # IO.puts "Subsequent queries"
+    # make_subsequent_queries(query) |> IO.inspect
+
+    [query | make_subsequent_queries(query)]
+  end
+
+  def make_increment(n, m, k, names) when n - k > 1 do
     [
       :if,
-      "#{offset_number_to_offset(k)} + 1 < ?n_relations",
+      "#{offset_number_to_offset(n - k)} + 1 < ?n_relations",
       make_incremental_query(n, m, k, names),
       make_increment(n, m, k + 1, names)
     ]
@@ -107,13 +181,11 @@ defmodule Cartex do
       for {name, i} <- Enum.with_index(names, 1) do
         case i do
           ^n ->
-            struct = %{offset: i, limit: i, name: name}
+            struct = [offset: [value: i], limit: [value: i], name: name]
             struct
-            # %{struct: struct, string: query_to_string(struct)} 
           _ ->
-            struct = %{offset: i, limit: 1, name: name}
+            struct = [offset: [value: i], limit: [value: 1, raw: true], name: name]
             struct
-            # %{struct: struct, string: query_to_string(struct, is_numerical_limit: true)}
         end
       end
     ]
@@ -123,9 +195,9 @@ defmodule Cartex do
       result ++ for k <- 1..m do 
         query = for {name, i} <- Enum.with_index(names, 1) do
           cond do
-            i == n - k -> %{offset: i, limit: i, name: name} # |> query_to_string(offset_suffix: " + 1")
-            i > n - k -> %{offset: nil, limit: nil, name: name} # |> query_to_string(is_numerical_limit: true)
-            true -> %{offset: i, limit: 1, name: name} # |> query_to_string(is_numerical_limit: true)
+            i == n - k -> [offset: [value: i, suffix: " + 1"], limit: [value: i], name: name] # |> query_to_string(offset_suffix: " + 1")
+            i > n - k -> [offset: nil, limit: nil, name: name] # |> query_to_string(is_numerical_limit: true)
+            true -> [offset: [value: i], limit: [value: 1, raw: true], name: name] # |> query_to_string(is_numerical_limit: true)
           end
         end
 
@@ -142,38 +214,32 @@ defmodule Cartex do
       true -> result
     end
 
-    increment = [
+    root_incremental_query = for {name, i} <- Enum.with_index(names, 1) do
+      cond do
+        i == n - m -> [offset: [value: i, suffix: " + #{limit_number_to_limit(n - m)} + 1"], limit: [value: 1, raw: true], name: name] # + limit_number_to_limit(n - m) + 1
+        i == n - m + 1 -> [offset: nil, limit: [value: i, kind: :tail], name: name]
+        i > n - m + 1 -> [offset: nil, limit: nil, name: name]
+        true -> [offset: [value: i], limit: [value: i], name: name]
+      end
+    end
+
+    root_incremental_query_with_subsequent_queries = [root_incremental_query | make_subsequent_queries(root_incremental_query)]
+
+    increment = cond do
+      m == 0 -> make_increment(n, m, m + 1, names)
+      m == n - 1 -> root_incremental_query_with_subsequent_queries
+      true -> [
       :if,
-      "#{offset_number_to_offset(n - m)} + #{limit_number_to_limit(n - m)} + 1 < ?n_relations",
-      for {name, i} <- Enum.with_index(names, 1) do
-        cond do
-          i == n - m -> %{offset: i, limit: 1, name: name} # + limit_number_to_limit(n - m) + 1
-          i == n - m + 1 -> %{offset: nil, limit: i, name: name}
-          i > n - m + 1 -> %{offset: nil, limit: nil, name: name}
-          true -> %{offset: i, limit: i, name: name}
-        end
-      end,
-      make_increment(n, m, m + 1, names)
-      # [
-      #   :if,
-      #   "#{offset_number_to_offset(n - m - 1)} + 1 < ?n_relations",
-      #   for {name, i} <- Enum.with_index(names, 1) do
-      #     cond do
-      #       i == n - m - 1 -> %{offset: i, limit: 1, name: name} # + 1
-      #       i == n - m -> %{offset: nil, limit: i, name: name} # tail limit
-      #       i > n - m -> %{offset: nil, limit: nil, name: name}
-      #       true -> %{offset: i, limit: i, name: name}
-      #     end
-      #   end
-      # ]
-    ]
+        "#{offset_number_to_offset(n - m)} + #{limit_number_to_limit(n - m)} + 1 < ?n_relations",
+        root_incremental_query_with_subsequent_queries,
+        make_increment(n, m, m + 1, names)
+      ]
+    end
 
     [padding: result, increment: increment]
   end
 
   def make_all_handlers(n, names, _core, opts \\ []) do
-    # as_string = Keyword.get(opts, :as_string, false)
-
     result = []
 
     result = for m <- 0..(n-1) do
@@ -186,10 +252,6 @@ defmodule Cartex do
     end
 
     result
-    # case as_string do
-    #   true -> last_digit_queries |> Enum.map(fn(query) -> query.string end) |> join_queries
-    #   _ -> last_digit_queries |> Enum.map(fn(query) -> query.struct end)
-    # end
   end
 end
 
