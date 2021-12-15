@@ -21,7 +21,7 @@ defmodule Cartex.MixProject do
 
   def escript do
     [
-      main_module: Cartex
+      main_module: Cartex.Cli
     ]
   end
 
