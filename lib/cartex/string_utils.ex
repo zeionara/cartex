@@ -13,17 +13,18 @@ defmodule Cartex.StringUtils do
   end
 
   # @spec query_to_string(Map) :: String.t
-  def query_to_string(%{offset: offset_number, limit: limit, name: name}, opts \\ []) do
-    is_numerical_offset = Keyword.get(opts, :is_numerical_offset, false)
-    is_numerical_limit = Keyword.get(opts, :is_numerical_limit, false)
-    is_tail_limit = Keyword.get(opts, :is_tail_limit, false)
+  def query_to_string([{:offset, offset}, {:limit, limit}, {:name, name} | _]) do
+    is_numerical_offset = if offset == nil, do: nil, else: Keyword.get(offset, :raw, false)
+    is_numerical_limit = if limit == nil, do: nil, else: Keyword.get(limit, :raw, false)
+    limit_kind = if limit == nil, do: nil, else: Keyword.get(limit, :kind, :head)
 
-    limit_kind = if is_tail_limit, do: :tail, else: :head
+    offset_suffix = if offset == nil, do: nil, else: Keyword.get(offset, :suffix, "")
+    limit_suffix = if limit == nil, do: nil, else: Keyword.get(limit, :suffix, "")
 
-    offset_suffix = Keyword.get(opts, :offset_suffix, "")
-    limit_suffix = Keyword.get(opts, :limit_suffix, "")
+    offset_value = if offset == nil, do: nil, else: Keyword.get(offset, :value, nil)
+    limit_value = if limit == nil, do: nil, else: Keyword.get(limit, :value, nil)
 
-    case %{offset: offset_number, limit: limit} do
+    case %{offset: offset_value, limit: limit_value} do
       %{offset: nil, limit: nil} -> """
         "select (?relation as ?#{name}) { include %relations }"
       """ |> String.replace("\n", "")
@@ -69,13 +70,66 @@ defmodule Cartex.StringUtils do
     end
   end
 
-  def join_queries(queries, sep \\ ", ") do
+  def join_queries(queries, sep \\ ", ", indentation_length \\ 0, _replace_newlines \\ false) do
+    indentation = for _ <- 1..indentation_length do " " end |> Enum.join
+
     for query <- queries do
-      """
-      " { ", #{query}, " } "
+      stringified_query = """
+      " { ",\\n#{query},\\n#{indentation}" } "
       """ |> String.replace("\n", "")
+
+      # case replace_newlines do
+      #   true -> stringified_query
+      #   false -> stringified_query |> String.replace("\\n", "\n")
+      # end
+      
+      stringified_query
     end
     |> Enum.join(sep)
+  end
+
+  def batcher_to_string(batcher, indentation_length \\ 1) do
+    current_indentation = for _ <- 1..indentation_length do " " end |> Enum.join
+    nested_indentation = for _ <- 1..(indentation_length + 2) do " " end |> Enum.join
+
+    # IO.puts "Got batcher"
+    # IO.inspect batcher
+
+    result = case batcher do
+      [:if, condition, positive_clause, negative_clause] ->
+          "#{current_indentation}" <> 
+            "if(\\n#{nested_indentation}#{condition}," <>
+            "\\n#{nested_indentation}concat(\\n#{batcher_to_string(positive_clause, indentation_length + 4)}\\n#{nested_indentation})," <>
+            case negative_clause do
+              [head | _] -> (
+                if head == :if,
+                  do: "\\n#{batcher_to_string(negative_clause, indentation_length + 2)}",
+                  else: "\\n#{nested_indentation}concat(\\n#{batcher_to_string(negative_clause, indentation_length + 4)}\\n#{nested_indentation})"  
+                )
+              :no_query -> " \"\"" 
+            end <>
+            "\\n#{current_indentation})"
+      [padding: padding, increment: increment] ->
+          "#{batcher_to_string(padding, indentation_length)},\\n#{current_indentation}\" union \",\\n#{batcher_to_string(increment, indentation_length)}"
+          # padding ++ increment |> Enum.map(fn(query) -> "\n#{batcher_to_string(query, indentation_length + 2)}" end) |> join_queries(",\n#{current_indentation} \" union \" ,\n#{current_indentation}", indentation_length)
+      [[[{:offset, _}, {:limit, _}  | _ ] | _ ] | _] = queries -> # "#{current_indentation}list of queries"
+          stringified_queries = queries |> Enum.with_index |> Enum.map(fn({query, _}) -> "#{batcher_to_string(query, indentation_length + 2)}" end) |> join_queries(",\\n#{current_indentation}\" union \",\\n#{current_indentation}", indentation_length) # #{if i == 0 do: "\n" else: ""}
+          "#{current_indentation}#{stringified_queries}"
+      [[{:offset, _}, {:limit, _}  | _ ] | _] = queries -> # "#{current_indentation}list of queries"
+          # "query"
+          stringified_queries = queries |> Enum.with_index |> Enum.map(fn({query, _}) -> "#{batcher_to_string(query, indentation_length + 2)}" end) |> join_queries(",\\n#{current_indentation}", indentation_length, true)
+
+          "#{current_indentation}#{stringified_queries}"
+      [{:offset, _}, {:limit, _}  | _ ] = query ->
+          "#{current_indentation}#{query_to_string(query)}"
+
+      _ -> "#{current_indentation}cannot parse batcher"
+    end
+
+    case indentation_length do
+      1 -> result |> String.replace("\\n", "\n")
+      _ -> result
+    end
   end
 end
 

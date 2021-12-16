@@ -3,20 +3,20 @@ defmodule Cartex do
 
   # @spec make_trivial_handlers_query(integer, list, list, integer, integer, integer) :: Map
   def make_trivial_handlers_query(n, names, distance) do
-    joined_queries = for {name, i} <- Enum.with_index(names, 1) do
-      case i do
-        ^n -> %{offset: nil, limit: i, name: name} |> query_to_string(is_tail_limit: true) # "limit #{tail}"
-        _ -> 
-          cond do
-            n - i > distance -> %{offset: i, limit: 1, name: name} |> query_to_string(is_numerical_limit: true) # "offset #{offset} limit 1"
-            n - i < distance -> %{offset: nil, limit: 1, name: name} |> query_to_string(is_numerical_limit: true) # "limit 1"
-            true -> %{offset: i, limit: 1, name: name} |> query_to_string(is_numerical_limit: true, offset_suffix: " + 1") # "offset #{offset} + 1 limit 1"
-          end
-      end
-    end 
-    |> join_queries
+    # joined_queries = for {name, i} <- Enum.with_index(names, 1) do
+    #   case i do
+    #     ^n -> %{offset: nil, limit: i, name: name} |> query_to_string(is_tail_limit: true) # "limit #{tail}"
+    #     _ -> 
+    #       cond do
+    #         n - i > distance -> %{offset: i, limit: 1, name: name} |> query_to_string(is_numerical_limit: true) # "offset #{offset} limit 1"
+    #         n - i < distance -> %{offset: nil, limit: 1, name: name} |> query_to_string(is_numerical_limit: true) # "limit 1"
+    #         true -> %{offset: i, limit: 1, name: name} |> query_to_string(is_numerical_limit: true, offset_suffix: " + 1") # "offset #{offset} + 1 limit 1"
+    #       end
+    #   end
+    # end 
+    # |> join_queries
 
-    "concat(#{joined_queries})"
+    # "concat(#{joined_queries})"
   end
 
   # @spec make_trivial_handlers(integer, list, list, integer, integer, integer) :: Map
@@ -37,19 +37,19 @@ defmodule Cartex do
       "with { select distinct ?relation where { [] ?relation [] } order by ?relation } as %relations with { select #{list_of_names_in_select_header} { "
     suffix = " } as %relations_ where { include %relations_  #{core} } group by #{list_of_names_in_select_header} order by desc(?count)"
 
-    first_query = for {name, i} <- Enum.with_index(names, 1) do
-      case i do
-        ^n -> %{offset: i, limit: n, name: name} |> query_to_string()
-        _ -> %{offset: i, limit: 1, name: name} |> query_to_string(is_numerical_limit: true)
-      end
-    end
-    |> join_queries
+    # first_query = for {name, i} <- Enum.with_index(names, 1) do
+    #   case i do
+    #     ^n -> %{offset: i, limit: n, name: name} |> query_to_string()
+    #     _ -> nil # %{offset: i, limit: 1, name: name} |> query_to_string(is_numerical_limit: true)
+    #   end
+    # end
+    # |> join_queries
 
-    second_query = make_trivial_handlers(n, names, 1)
+    # second_query = make_trivial_handlers(n, names, 1)
 
-    """
-    concat("#{prefix}", #{join_queries([first_query, second_query], ", \" union \" ,")}, " } ", "#{suffix}")
-    """ |> String.replace("\n", "")
+    # """
+    # concat("#{prefix}", #{join_queries([first_query, second_query], ", \" union \" ,")}, " } ", "#{suffix}")
+    # """ |> String.replace("\n", "")
     # %{first_query: first_query, second_query: second_query}
   end
 
@@ -150,7 +150,7 @@ defmodule Cartex do
         i == n - m -> [offset: nil, limit: [value: i, kind: :tail], name: name]
         i == n - k -> [offset: [value: i, suffix: " + 1"], limit: [value: 1, raw: true], name: name]
         i > n - m -> [offset: nil, limit: nil, name: name]
-        true -> [offset: [value: i], limit: [value: i], name: name]
+        true -> [offset: [value: i], limit: [value: 1, raw: true], name: name] # (if i == 1, do: [value: i, kind: :root], else: [value: i])
       end
     end
 
@@ -195,7 +195,7 @@ defmodule Cartex do
       result ++ for k <- 1..m do 
         query = for {name, i} <- Enum.with_index(names, 1) do
           cond do
-            i == n - k -> [offset: [value: i, suffix: " + 1"], limit: [value: i], name: name] # |> query_to_string(offset_suffix: " + 1")
+            i == n - k -> [offset: [value: i, suffix: " + 1"], limit: (if i == 1, do: [value: i, kind: :root], else: [value: i]), name: name] # |> query_to_string(offset_suffix: " + 1")
             i > n - k -> [offset: nil, limit: nil, name: name] # |> query_to_string(is_numerical_limit: true)
             true -> [offset: [value: i], limit: [value: 1, raw: true], name: name] # |> query_to_string(is_numerical_limit: true)
           end
@@ -216,7 +216,7 @@ defmodule Cartex do
 
     root_incremental_query = for {name, i} <- Enum.with_index(names, 1) do
       cond do
-        i == n - m -> [offset: [value: i, suffix: " + #{limit_number_to_limit(n - m)} + 1"], limit: [value: 1, raw: true], name: name] # + limit_number_to_limit(n - m) + 1
+        i == n - m -> [offset: [value: i, suffix: " + #{limit_number_to_limit(i, kind: (if i == 1, do: :root, else: :head))} + 1"], limit: [value: 1, raw: true], name: name] # + limit_number_to_limit(n - m) + 1
         i == n - m + 1 -> [offset: nil, limit: [value: i, kind: :tail], name: name]
         i > n - m + 1 -> [offset: nil, limit: nil, name: name]
         true -> [offset: [value: i], limit: [value: i], name: name]
@@ -230,7 +230,7 @@ defmodule Cartex do
       m == n - 1 -> root_incremental_query_with_subsequent_queries
       true -> [
       :if,
-        "#{offset_number_to_offset(n - m)} + #{limit_number_to_limit(n - m)} + 1 < ?n_relations",
+        "?#{offset_number_to_offset(n - m)} + ?#{limit_number_to_limit(n - m)} + 1 < ?n_relations",
         root_incremental_query_with_subsequent_queries,
         make_increment(n, m, m + 1, names)
       ]
@@ -239,19 +239,39 @@ defmodule Cartex do
     [padding: result, increment: increment]
   end
 
-  def make_all_handlers(n, names, _core, opts \\ []) do
-    result = []
+  def make_next_handler(n, names, m \\ 0) when m < n - 1 do
+    # IO.puts "MAKE NEXT HANDLER for m = #{m}, n = #{n}"
+    [
+      :if,
+      for k <- (m + 1)..(n - 1) do "?#{limit_number_to_limit(n - k, kind: :root)} = 0" end |> Enum.join(" && "),
+      make_handlers_for_m(n, m, names),
+      make_next_handler(n, names, m + 1)
+    ]
+  end
 
-    result = for m <- 0..(n-1) do
-      [
-        {
-          String.to_atom("m_#{m}"),
-          make_handlers_for_m(n, m, names)
-        }
-      | result ]
-    end
+  def make_next_handler(n, names, m) do
+    # IO.puts "MAKE NEXT UNCONDITIONED HANDLER for m = #{m}, n = #{n}"
+     make_handlers_for_m(n, m, names)
+  end
 
-    result
+  def make_all_handlers(n, names, _core, _opts \\ []) do
+    # result = []
+
+    # result = for m <- 0..(n-1) do
+    #   [
+    #     {
+    #       String.to_atom("m_#{m}"),
+    #       make_handlers_for_m(n, m, names)
+    #     }
+    #   | result ]
+    # end
+
+    # result
+    batcher = make_next_handler(n, names)
+
+    batcher_to_string(batcher) |> IO.puts
+
+    batcher
   end
 end
 
