@@ -18,7 +18,6 @@ defmodule Cartex.Cli do
   require Cartex.CliMacros
 
   import Cartex.CliMacros
-  import Cartex.IndexHandlers
 
   def main(argv) do
     Optimus.new!(
@@ -99,6 +98,13 @@ defmodule Cartex.Cli do
               short: "-o",
               long: "--output"
             ]
+          ],
+          flags: [
+            verbose_header: [
+              long: "--verbose-header",
+              help: "Include additional information into the generated query header",
+              miltiple: false
+            ]
           ]
         ]
       ]
@@ -108,9 +114,11 @@ defmodule Cartex.Cli do
       end
   end
 
-  def make_meta_query(%Optimus.ParseResult{options: %{limit: limit, offset: offset, n: n, core: core, output: output}, unknown: names}) do
+  def make_meta_query(%Optimus.ParseResult{options: %{limit: limit, offset: offset, n: n, core: core, output: output}, flags: %{verbose_header: verbose_header}, unknown: names}) do
+    n_entries = for _ <- 1..n do "?n_relations" end |> Enum.join(" * ")
+
     query = """
-    select ?query {
+    select #{if verbose_header, do: Cartex.make_verbose_header(n) <> " ", else: ""}?query {
       {
         select (count(distinct ?relation) as ?n_relations) where {
           [] ?relation []
@@ -120,23 +128,28 @@ defmodule Cartex.Cli do
       bind(#{offset} as ?offset_0)
       bind(#{limit} as ?limit_0)
 
-      #{split_offset(n)}
+      bind(#{n_entries} as ?n_entries)
 
-      #{split_limit(n)}
+      # offset
 
+    #{Cartex.IndexHandlers.split_offset(n, 1)}
+      # limit
+     
+    #{Cartex.IndexHandlers.split_limit(n, 1)}
       bind(
         if(
-          ?limit_0 >= ?n_relations,
-          concat("ERROR: Batch size must be less than ", str(?n_relations)),
+          ?limit_0 >= ?n_entries,
+          concat("ERROR: Batch size must be less than ", str(?n_entries)),
           if(
-            ?offset_0 >= #{for _ <- 1..n do "?n_relations" end |> Enum.join(" * ")},
+            ?offset_0 >= ?n_entries,
             concat("ERROR: Stop iteration when generating query with offset ", str(?offset_0)),
-            #{Cartex.make_handlers(n, (if length(names) < 1, do: ["premise", "statement", "conclusion"], else: names), core)}
+    #{Cartex.make_all_handlers(n, (if length(names) < 1, do: ["premise", "statement", "conclusion"], else: names), core)}
           )
-        ) as ?query
+        )
+        as ?query
       )
     }
-    """ # |> IO.puts # TODO: Eliminate redundant arguments from the make_trivial_handlers call above
+    """
 
     case output do
       nil -> IO.puts(query)
