@@ -12,13 +12,6 @@ defmodule Cartex do
     |> Enum.join(" ")
   end
 
-  def flatten_one_dimension(list) do
-    case list do
-      [] -> []
-      [head | tail] -> head ++ flatten_one_dimension(tail)
-    end
-  end
-
   def check_next_query_pair(pairs, _found_pair) when pairs == [] do
     pairs
   end
@@ -30,7 +23,7 @@ defmodule Cartex do
       {[offset: nil, limit: [value: limit_value, kind: :tail], name: subquery_name], [offset: nil, limit: nil, name: next_name]} ->
         # IO.inspect {subquery, next}
         [
-          [offset: [value: "#{limit_number_to_limit(limit_value, kind: :tail)}", raw: true], limit: [value: 1, raw: true], name: subquery_name],
+          [offset: [value: "\", str(?#{limit_number_to_limit(limit_value, kind: :tail)}), \"", raw: true], limit: [value: 1, raw: true], name: subquery_name],
           [offset: nil, limit: [value: limit_value + 1, kind: :tail], name: next_name]
         ] ++ check_next_query_pair(tail, true)
       _ -> case found_pair do
@@ -132,7 +125,7 @@ defmodule Cartex do
         i == n - m -> [offset: [value: i, suffix: " + ?#{limit_number_to_limit(i, kind: (if i == 1, do: :root, else: :head))} + 1"], limit: [value: 1, raw: true], name: name] # + limit_number_to_limit(n - m) + 1
         i == n - m + 1 -> [offset: nil, limit: [value: i, kind: :tail], name: name]
         i > n - m + 1 -> [offset: nil, limit: nil, name: name]
-        true -> [offset: [value: i], limit: [value: i], name: name]
+        true -> [offset: [value: i], limit: [value: 1, raw: true], name: name]
       end
     end
 
@@ -181,7 +174,7 @@ defmodule Cartex do
               "} as %relations ",\\n
               "with {",\\n
                 "select #{list_of_names_in_select_header} {",\\n
-#{batcher_to_string(batcher, 14, 14)},\\n
+#{batcher_to_string(batcher, 7)},\\n
                 " } ",\\n
               " } as %relations_ ",\\n
               "where {",\\n

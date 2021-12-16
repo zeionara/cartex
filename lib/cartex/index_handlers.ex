@@ -5,7 +5,7 @@ defmodule Cartex.IndexHandlers do
     quotient = Keyword.get(opts, :quotient, "#{result}_quotient")
     indentation_length = Keyword.get(opts, :indentation_length, 0)
 
-    indentation = if indentation_length == 0, do: "", else: (for _ <- 1..indentation_length do " " end |> Enum.join)
+    indentation = make_indentation(indentation_length)
 
     """
     #{indentation}bind(floor(?#{dividend} / ?#{divisor}) as ?#{quotient})\\n
@@ -34,7 +34,7 @@ defmodule Cartex.IndexHandlers do
   end
 
   def split_limit(n, indentation_length \\ 0) do
-    indentation = if indentation_length == 0, do: "", else: (for _ <- 1..indentation_length do " " end |> Enum.join)
+    indentation = make_indentation(indentation_length)
 
     for i <- n..2 do
       root_divisor_name = (
@@ -50,9 +50,16 @@ defmodule Cartex.IndexHandlers do
           indentation_length: indentation_length
         )
       }
+
       #{indentation}bind(?n_relations - ?#{offset_number_to_offset(i)} #{if i < n, do: " - 1", else: ""} as ?n_relations_sub_#{offset_number_to_offset(i)})\\n
-      #{indentation}bind(if (?#{limit_number_to_limit(i, kind: :root)}_min_quotient > 0 || ?n_relations_sub_#{offset_number_to_offset(i)} < ?#{limit_number_to_limit(i, kind: :root)}_max, ?n_relations_sub_#{offset_number_to_offset(i)}, ?#{limit_number_to_limit(i, kind: :root)}_max) as ?#{limit_number_to_limit(i)})\\n\\n
+
+      #{indentation}bind(
+      if (?#{limit_number_to_limit(i, kind: :root)}_min_quotient > 0 || ?n_relations_sub_#{offset_number_to_offset(i)} < ?#{limit_number_to_limit(i, kind: :root)}_max,
+      ?n_relations_sub_#{offset_number_to_offset(i)},
+      ?#{limit_number_to_limit(i, kind: :root)}_max) as ?#{limit_number_to_limit(i)})\\n\\n
+
       #{indentation}bind(?#{root_divisor_name} - ?#{limit_number_to_limit(i)} as ?#{root_divisor_name}_updated)\\n
+
       #{
         make_mod(
           "#{root_divisor_name}_updated",
@@ -62,6 +69,7 @@ defmodule Cartex.IndexHandlers do
           indentation_length: indentation_length
         )
       }
+
       #{indentation}bind(?#{limit_number_to_limit(i)} + ?#{limit_number_to_limit(i, kind: :tail)} as ?#{limit_number_to_limit(i, kind: :root)})\\n
       """ |> String.replace("\n", "")
     end |> Enum.join("\\n") |> String.replace("\\n", "\n")

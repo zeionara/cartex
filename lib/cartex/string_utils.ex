@@ -1,4 +1,12 @@
 defmodule Cartex.StringUtils do
+  @indentation_step Application.get_env(:cartex, :indentation_step)
+
+  def indentation_step, do: @indentation_step
+
+  def make_indentation(length, step \\ @indentation_step) do
+    for _ <- 1..(length * step) do " " end |> Enum.join
+  end
+
   def offset_number_to_offset(offset_number) do
     "offset_#{offset_number}"
   end
@@ -12,7 +20,6 @@ defmodule Cartex.StringUtils do
     end
   end
 
-  # @spec query_to_string(Map) :: String.t
   def query_to_string([{:offset, offset}, {:limit, limit}, {:name, name} | _]) do
     is_numerical_offset = if offset == nil, do: nil, else: Keyword.get(offset, :raw, false)
     is_numerical_limit = if limit == nil, do: nil, else: Keyword.get(limit, :raw, false)
@@ -70,54 +77,59 @@ defmodule Cartex.StringUtils do
     end
   end
 
-  def join_queries(queries, sep \\ ", ", indentation_length \\ 0, _replace_newlines \\ false) do
-    indentation = for _ <- 1..indentation_length do " " end |> Enum.join
+  def join_queries(queries, sep \\ ", ", indentation_length \\ 0) do
+    indentation = make_indentation(indentation_length)
 
     for query <- queries do
       stringified_query = """
       " { ",\\n#{query},\\n#{indentation}" } "
       """ |> String.replace("\n", "")
-
-      # case replace_newlines do
-      #   true -> stringified_query
-      #   false -> stringified_query |> String.replace("\\n", "\n")
-      # end
       
       stringified_query
     end
     |> Enum.join(sep)
   end
 
-  def batcher_to_string(batcher, indentation_length \\ 1, initial_indentation_length \\ 1) do
-    current_indentation = for _ <- 1..indentation_length do " " end |> Enum.join
-    nested_indentation = for _ <- 1..(indentation_length + 2) do " " end |> Enum.join
+  def batcher_to_string(batcher, indentation_length \\ 1) do
+    current_indentation = make_indentation(indentation_length)
+    nested_indentation = make_indentation(indentation_length + 1)
 
-    # IO.puts "Got batcher"
-    # IO.inspect batcher
-
-    result = case batcher do
+    case batcher do
       [:if, condition, positive_clause, negative_clause] ->
           "#{current_indentation}" <> 
             "if(\\n#{nested_indentation}#{condition}," <>
-            "\\n#{nested_indentation}concat(\\n#{batcher_to_string(positive_clause, indentation_length + 4, initial_indentation_length)}\\n#{nested_indentation})," <>
+            "\\n#{nested_indentation}concat(\\n#{batcher_to_string(positive_clause, indentation_length + 2)}\\n#{nested_indentation})," <>
             case negative_clause do
               [head | _] -> (
                 if head == :if,
-                  do: "\\n#{batcher_to_string(negative_clause, indentation_length + 2, initial_indentation_length)}",
-                  else: "\\n#{nested_indentation}concat(\\n#{batcher_to_string(negative_clause, indentation_length + 4, initial_indentation_length)}\\n#{nested_indentation})"  
+                  do: "\\n#{batcher_to_string(negative_clause, indentation_length + 1)}",
+                  else: "\\n#{nested_indentation}concat(\\n#{batcher_to_string(negative_clause, indentation_length + 2)}\\n#{nested_indentation})"  
                 )
               :no_query -> " \"\"" 
             end <>
             "\\n#{current_indentation})"
       [padding: padding, increment: increment] ->
-          "#{batcher_to_string(padding, indentation_length, initial_indentation_length)},\\n#{current_indentation}\" union \",\\n#{batcher_to_string(increment, indentation_length, initial_indentation_length)}"
-          # padding ++ increment |> Enum.map(fn(query) -> "\n#{batcher_to_string(query, indentation_length + 2)}" end) |> join_queries(",\n#{current_indentation} \" union \" ,\n#{current_indentation}", indentation_length)
-      [[[{:offset, _}, {:limit, _}  | _ ] | _ ] | _] = queries -> # "#{current_indentation}list of queries"
-          stringified_queries = queries |> Enum.with_index |> Enum.map(fn({query, _}) -> "#{batcher_to_string(query, indentation_length + 2, initial_indentation_length)}" end) |> join_queries(",\\n#{current_indentation}\" union \",\\n#{current_indentation}", indentation_length) # #{if i == 0 do: "\n" else: ""}
+          "#{batcher_to_string(padding, indentation_length)},\\n#{current_indentation}\" union \",\\n#{batcher_to_string(increment, indentation_length)}"
+      [[[{:offset, _}, {:limit, _}  | _ ] | _ ] | _] = queries ->
+          stringified_queries = 
+            queries
+            |> Enum.map(
+              fn(query) ->
+                batcher_to_string(query, indentation_length + 1)
+              end
+            )
+            |> join_queries(",\\n#{current_indentation}\" union \",\\n#{current_indentation}", indentation_length)
+
           "#{current_indentation}#{stringified_queries}"
-      [[{:offset, _}, {:limit, _}  | _ ] | _] = queries -> # "#{current_indentation}list of queries"
-          # "query"
-          stringified_queries = queries |> Enum.with_index |> Enum.map(fn({query, _}) -> "#{batcher_to_string(query, indentation_length + 2, initial_indentation_length)}" end) |> join_queries(",\\n#{current_indentation}", indentation_length, true)
+      [[{:offset, _}, {:limit, _}  | _ ] | _] = queries ->
+          stringified_queries =
+            queries
+            |> Enum.map(
+              fn(query) ->
+                batcher_to_string(query, indentation_length + 1)
+              end
+            )
+            |> join_queries(",\\n#{current_indentation}", indentation_length)
 
           "#{current_indentation}#{stringified_queries}"
       [{:offset, _}, {:limit, _}  | _ ] = query ->
@@ -125,13 +137,6 @@ defmodule Cartex.StringUtils do
 
       _ -> "#{current_indentation}cannot parse batcher"
     end
-
-    # case indentation_length do
-    #   ^initial_indentation_length -> result |> String.replace("\\n", "\n")
-    #   _ -> result
-    # end
-    
-    result
   end
 end
 

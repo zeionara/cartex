@@ -16,10 +16,10 @@ select ?query {
 
   # offset
 
-#{Cartex.IndexHandlers.split_offset(n, 2)}
+#{Cartex.IndexHandlers.split_offset(n, 1)}
   # limit
  
-#{Cartex.IndexHandlers.split_limit(n, 2)}
+#{Cartex.IndexHandlers.split_limit(n, 1)}
   bind(
 #{Cartex.make_all_handlers(n, ["premise", "statement", "conclusion"], "?h ?premise ?t. ?t ?statement ?n. filter(!exists{?h ?conclusion ?n})")}
     as ?query
