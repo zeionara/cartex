@@ -120,10 +120,12 @@ defmodule Cartex.Cli do
       bind(#{offset} as ?offset_0)
       bind(#{limit} as ?limit_0)
 
-      #{split_offset(n)}
+      # offset
 
-      #{split_limit(n)}
-
+    #{Cartex.IndexHandlers.split_offset(n, 2)}
+      # limit
+     
+    #{Cartex.IndexHandlers.split_limit(n, 2)}
       bind(
         if(
           ?limit_0 >= ?n_relations,
@@ -131,12 +133,13 @@ defmodule Cartex.Cli do
           if(
             ?offset_0 >= #{for _ <- 1..n do "?n_relations" end |> Enum.join(" * ")},
             concat("ERROR: Stop iteration when generating query with offset ", str(?offset_0)),
-            #{Cartex.make_handlers(n, (if length(names) < 1, do: ["premise", "statement", "conclusion"], else: names), core)}
+    #{Cartex.make_all_handlers(n, (if length(names) < 1, do: ["premise", "statement", "conclusion"], else: names), core)}
           )
-        ) as ?query
+        )
+        as ?query
       )
     }
-    """ # |> IO.puts # TODO: Eliminate redundant arguments from the make_trivial_handlers call above
+    """
 
     case output do
       nil -> IO.puts(query)

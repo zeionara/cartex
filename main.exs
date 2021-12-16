@@ -2,7 +2,7 @@ n = 3
 offset = 16
 limit = 8
 
-query = """
+"""
 # select #{Cartex.make_verbose_header(3)} {
 select ?query {
   {
