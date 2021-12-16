@@ -166,7 +166,7 @@ defmodule Cartex do
   def make_increment(n, m, k, names) when n - k > 1 do
     [
       :if,
-      "#{offset_number_to_offset(n - k)} + 1 < ?n_relations",
+      "?#{offset_number_to_offset(n - k)} + 1 < ?n_relations",
       make_incremental_query(n, m, k, names),
       make_increment(n, m, k + 1, names)
     ]
@@ -216,7 +216,7 @@ defmodule Cartex do
 
     root_incremental_query = for {name, i} <- Enum.with_index(names, 1) do
       cond do
-        i == n - m -> [offset: [value: i, suffix: " + #{limit_number_to_limit(i, kind: (if i == 1, do: :root, else: :head))} + 1"], limit: [value: 1, raw: true], name: name] # + limit_number_to_limit(n - m) + 1
+        i == n - m -> [offset: [value: i, suffix: " + ?#{limit_number_to_limit(i, kind: (if i == 1, do: :root, else: :head))} + 1"], limit: [value: 1, raw: true], name: name] # + limit_number_to_limit(n - m) + 1
         i == n - m + 1 -> [offset: nil, limit: [value: i, kind: :tail], name: name]
         i > n - m + 1 -> [offset: nil, limit: nil, name: name]
         true -> [offset: [value: i], limit: [value: i], name: name]
@@ -254,7 +254,7 @@ defmodule Cartex do
      make_handlers_for_m(n, m, names)
   end
 
-  def make_all_handlers(n, names, _core, _opts \\ []) do
+  def make_all_handlers(n, names, core, _opts \\ []) do
     # result = []
 
     # result = for m <- 0..(n-1) do
@@ -269,9 +269,50 @@ defmodule Cartex do
     # result
     batcher = make_next_handler(n, names)
 
-    batcher_to_string(batcher) |> IO.puts
+    # batcher_to_string(batcher) |> IO.puts
 
-    batcher
+    # batcher
+
+    list_of_names_in_select_header = for name <- names do "?#{name}" end |> Enum.join(" ")
+    prefix = "select (count(*) as ?count) #{list_of_names_in_select_header} " <> 
+      "with { select distinct ?relation where { [] ?relation [] } order by ?relation } as %relations with { select #{list_of_names_in_select_header} { "
+    suffix = " } as %relations_ where { include %relations_  #{core} } group by #{list_of_names_in_select_header} order by desc(?count)"
+
+#     prefix = """
+# select (count(*) as ?count) #{list_of_names_in_select_header} 
+# with {
+#   select distinct ?relation where { [] ?relation [] } order by ?relation
+# } as %relations
+# with {
+#   select #{list_of_names_in_select_header} {
+# #{batcher_to_string(batcher, 4, 4)}
+#   }
+# }
+# """ |> IO.puts
+
+#     batcher
+# "#{prefix}",\\n
+#"#{suffix}"\\n
+    """
+        concat(\\n
+          "select (count(*) as ?count) #{list_of_names_in_select_header} ",\\n
+          "with {",\\n
+            "select distinct ?relation where {",\\n
+              "[] ?relation []",\\n
+            "} order by ?relation",\\n
+          "} as %relations ",\\n
+          "with {",\\n
+            "select #{list_of_names_in_select_header} {",\\n
+#{batcher_to_string(batcher, 10, 10)},\\n
+            " } ",\\n
+          " } as %relations_ ",\\n
+          "where {",\\n
+            "include %relations_",\\n
+            "#{core}",\\n
+          "} group by #{list_of_names_in_select_header} ",\\n
+          "order by desc(?count)"\\n
+        )
+    """ |> String.replace("\n", "") |> String.replace("\\n", "\n")
   end
 end
 

@@ -88,7 +88,7 @@ defmodule Cartex.StringUtils do
     |> Enum.join(sep)
   end
 
-  def batcher_to_string(batcher, indentation_length \\ 1) do
+  def batcher_to_string(batcher, indentation_length \\ 1, initial_indentation_length \\ 1) do
     current_indentation = for _ <- 1..indentation_length do " " end |> Enum.join
     nested_indentation = for _ <- 1..(indentation_length + 2) do " " end |> Enum.join
 
@@ -99,25 +99,25 @@ defmodule Cartex.StringUtils do
       [:if, condition, positive_clause, negative_clause] ->
           "#{current_indentation}" <> 
             "if(\\n#{nested_indentation}#{condition}," <>
-            "\\n#{nested_indentation}concat(\\n#{batcher_to_string(positive_clause, indentation_length + 4)}\\n#{nested_indentation})," <>
+            "\\n#{nested_indentation}concat(\\n#{batcher_to_string(positive_clause, indentation_length + 4, initial_indentation_length)}\\n#{nested_indentation})," <>
             case negative_clause do
               [head | _] -> (
                 if head == :if,
-                  do: "\\n#{batcher_to_string(negative_clause, indentation_length + 2)}",
-                  else: "\\n#{nested_indentation}concat(\\n#{batcher_to_string(negative_clause, indentation_length + 4)}\\n#{nested_indentation})"  
+                  do: "\\n#{batcher_to_string(negative_clause, indentation_length + 2, initial_indentation_length)}",
+                  else: "\\n#{nested_indentation}concat(\\n#{batcher_to_string(negative_clause, indentation_length + 4, initial_indentation_length)}\\n#{nested_indentation})"  
                 )
               :no_query -> " \"\"" 
             end <>
             "\\n#{current_indentation})"
       [padding: padding, increment: increment] ->
-          "#{batcher_to_string(padding, indentation_length)},\\n#{current_indentation}\" union \",\\n#{batcher_to_string(increment, indentation_length)}"
+          "#{batcher_to_string(padding, indentation_length, initial_indentation_length)},\\n#{current_indentation}\" union \",\\n#{batcher_to_string(increment, indentation_length, initial_indentation_length)}"
           # padding ++ increment |> Enum.map(fn(query) -> "\n#{batcher_to_string(query, indentation_length + 2)}" end) |> join_queries(",\n#{current_indentation} \" union \" ,\n#{current_indentation}", indentation_length)
       [[[{:offset, _}, {:limit, _}  | _ ] | _ ] | _] = queries -> # "#{current_indentation}list of queries"
-          stringified_queries = queries |> Enum.with_index |> Enum.map(fn({query, _}) -> "#{batcher_to_string(query, indentation_length + 2)}" end) |> join_queries(",\\n#{current_indentation}\" union \",\\n#{current_indentation}", indentation_length) # #{if i == 0 do: "\n" else: ""}
+          stringified_queries = queries |> Enum.with_index |> Enum.map(fn({query, _}) -> "#{batcher_to_string(query, indentation_length + 2, initial_indentation_length)}" end) |> join_queries(",\\n#{current_indentation}\" union \",\\n#{current_indentation}", indentation_length) # #{if i == 0 do: "\n" else: ""}
           "#{current_indentation}#{stringified_queries}"
       [[{:offset, _}, {:limit, _}  | _ ] | _] = queries -> # "#{current_indentation}list of queries"
           # "query"
-          stringified_queries = queries |> Enum.with_index |> Enum.map(fn({query, _}) -> "#{batcher_to_string(query, indentation_length + 2)}" end) |> join_queries(",\\n#{current_indentation}", indentation_length, true)
+          stringified_queries = queries |> Enum.with_index |> Enum.map(fn({query, _}) -> "#{batcher_to_string(query, indentation_length + 2, initial_indentation_length)}" end) |> join_queries(",\\n#{current_indentation}", indentation_length, true)
 
           "#{current_indentation}#{stringified_queries}"
       [{:offset, _}, {:limit, _}  | _ ] = query ->
@@ -126,10 +126,12 @@ defmodule Cartex.StringUtils do
       _ -> "#{current_indentation}cannot parse batcher"
     end
 
-    case indentation_length do
-      1 -> result |> String.replace("\\n", "\n")
-      _ -> result
-    end
+    # case indentation_length do
+    #   ^initial_indentation_length -> result |> String.replace("\\n", "\n")
+    #   _ -> result
+    # end
+    
+    result
   end
 end
 
