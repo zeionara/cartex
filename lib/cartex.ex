@@ -21,21 +21,23 @@ defmodule Cartex do
 
     case {subquery, next} do
       {[offset: nil, limit: [value: limit_value, kind: :tail], name: subquery_name], [offset: nil, limit: nil, name: next_name]} ->
-        # IO.inspect {subquery, next}
         [
-          [offset: [value: "\", str(?#{limit_number_to_limit(limit_value, kind: :tail)}), \"", raw: true], limit: [value: 1, raw: true], name: subquery_name],
-          [offset: nil, limit: [value: limit_value + 1, kind: :tail], name: next_name]
-        ] ++ check_next_query_pair(tail, true)
+          [offset: [value: "\", str(?#{limit_number_to_limit(limit_value, kind: :tail)}), \"", raw: true], limit: [value: 1, raw: true], name: subquery_name] |
+          [
+            [offset: nil, limit: [value: limit_value + 1, kind: :tail], name: next_name] |
+            check_next_query_pair(tail, true)
+          ]
+        ] 
       _ -> case found_pair do
         false ->
           case subquery do
             nil -> check_next_query_pair(tail, found_pair)
-            _ -> [subquery] ++ check_next_query_pair(tail, found_pair)
+            _ -> [subquery | check_next_query_pair(tail, found_pair)]
           end
         true -> 
           case next do
             nil -> check_next_query_pair(tail, found_pair)
-            _ -> [next] ++ check_next_query_pair(tail, found_pair)
+            _ -> [next | check_next_query_pair(tail, found_pair)]
           end
       end
     end
