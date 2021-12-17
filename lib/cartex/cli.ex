@@ -104,6 +104,11 @@ defmodule Cartex.Cli do
               long: "--verbose-header",
               help: "Include additional information into the generated query header",
               miltiple: false
+            ],
+            silent: [
+              long: "--silent",
+              help: "Do not output the generated query",
+              miltiple: false
             ]
           ]
         ]
@@ -114,7 +119,7 @@ defmodule Cartex.Cli do
       end
   end
 
-  def make_meta_query(%Optimus.ParseResult{options: %{limit: limit, offset: offset, n: n, core: core, output: output}, flags: %{verbose_header: verbose_header}, unknown: names}) do
+  def make_meta_query(%Optimus.ParseResult{options: %{limit: limit, offset: offset, n: n, core: core, output: output}, flags: %{verbose_header: verbose_header, silent: silent}, unknown: names}) do
     n_entries = for _ <- 1..n do "?n_relations" end |> Enum.join(" * ")
 
     query = """
@@ -152,7 +157,7 @@ defmodule Cartex.Cli do
     """
 
     case output do
-      nil -> IO.puts(query)
+      nil -> unless silent do IO.puts(query) end
       _ -> case File.open(output, [:write]) do
         {:ok, file} -> 
           IO.binwrite(file, query)
@@ -160,6 +165,8 @@ defmodule Cartex.Cli do
         {:error, error} -> raise "Cannot open file #{output} for writing: #{error}"
       end
     end
+
+    query
   end
 end
 
