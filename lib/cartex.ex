@@ -12,33 +12,39 @@ defmodule Cartex do
     |> Enum.join(" ")
   end
 
-  def check_next_query_pair(pairs, _found_pair) when pairs == [] do
-    pairs
+  def check_next_query_pair(pairs, found_pair, collected_queries \\ [])
+
+  def check_next_query_pair(pairs, _found_pair, collected_queries) when pairs == [] do
+    collected_queries
   end
 
-  def check_next_query_pair(pairs, found_pair) do
+  def check_next_query_pair(pairs, found_pair, collected_queries) do
     [{subquery, next} | tail] = pairs
 
-    case {subquery, next} do
-      {[offset: nil, limit: [value: limit_value, kind: :tail], name: subquery_name], [offset: nil, limit: nil, name: next_name]} ->
-        # IO.inspect {subquery, next}
-        [
-          [offset: [value: "\", str(?#{limit_number_to_limit(limit_value, kind: :tail)}), \"", raw: true], limit: [value: 1, raw: true], name: subquery_name],
-          [offset: nil, limit: [value: limit_value + 1, kind: :tail], name: next_name]
-        ] ++ check_next_query_pair(tail, true)
-      _ -> case found_pair do
-        false ->
-          case subquery do
-            nil -> check_next_query_pair(tail, found_pair)
-            _ -> [subquery] ++ check_next_query_pair(tail, found_pair)
+    check_next_query_pair(
+      tail,
+      true,
+      collected_queries ++ 
+        case {subquery, next} do
+          {[offset: nil, limit: [value: limit_value, kind: :tail], name: subquery_name], [offset: nil, limit: nil, name: next_name]} ->
+            [
+              [offset: [value: "\", str(?#{limit_number_to_limit(limit_value, kind: :tail)}), \"", raw: true], limit: [value: 1, raw: true], name: subquery_name],
+              [offset: nil, limit: [value: limit_value + 1, kind: :tail], name: next_name]
+            ] ++ check_next_query_pair(tail, true)
+          _ -> case found_pair do
+            false ->
+              case subquery do
+                nil -> check_next_query_pair(tail, found_pair)
+                _ -> [subquery] ++ check_next_query_pair(tail, found_pair)
+              end
+            true -> 
+              case next do
+                nil -> check_next_query_pair(tail, found_pair)
+                _ -> [next] ++ check_next_query_pair(tail, found_pair)
+              end
           end
-        true -> 
-          case next do
-            nil -> check_next_query_pair(tail, found_pair)
-            _ -> [next] ++ check_next_query_pair(tail, found_pair)
-          end
-      end
-    end
+        end
+    )
   end
 
   def make_subsequent_query(base) do
