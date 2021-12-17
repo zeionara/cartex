@@ -104,6 +104,11 @@ defmodule Cartex.Cli do
               long: "--verbose-header",
               help: "Include additional information into the generated query header",
               miltiple: false
+            ],
+            silent: [
+              long: "--silent",
+              help: "Do not output the generated query",
+              miltiple: false
             ]
           ]
         ]
@@ -114,7 +119,7 @@ defmodule Cartex.Cli do
       end
   end
 
-  def make_meta_query(%Optimus.ParseResult{options: %{limit: limit, offset: offset, n: n, core: core, output: output}, flags: %{verbose_header: verbose_header}, unknown: names}) do
+  def make_meta_query(%Optimus.ParseResult{options: %{limit: limit, offset: offset, n: n, core: core, output: output}, flags: %{verbose_header: verbose_header, silent: silent}, unknown: names}) do
     n_entries = for _ <- 1..n do "?n_relations" end |> Enum.join(" * ")
 
     query = """
@@ -152,7 +157,7 @@ defmodule Cartex.Cli do
     """
 
     case output do
-      nil -> IO.puts(query)
+      nil -> unless silent do IO.puts(query) end
       _ -> case File.open(output, [:write]) do
         {:ok, file} -> 
           IO.binwrite(file, query)
@@ -160,6 +165,60 @@ defmodule Cartex.Cli do
         {:error, error} -> raise "Cannot open file #{output} for writing: #{error}"
       end
     end
+
+    query
+  end
+
+  def make_specific_query(
+    %Optimus.ParseResult{options: %{limit: limit, offset: offset, core: core, output: output}, flags: %{silent: silent}, unknown: names}
+  ) do
+    list_of_names_in_select_header = for name <- names do "?#{name}" end
+    joined_list_of_names_in_select_header = list_of_names_in_select_header |> Enum.join(" ")
+
+    query = """
+    select (count(*) as ?count) #{joined_list_of_names_in_select_header}
+    with {
+      select distinct ?relation where {
+        [] ?relation []
+      } order by ?relation
+    } as %relations
+    with {
+      select #{joined_list_of_names_in_select_header} {
+        #{
+          for {name, i} <- Stream.with_index(list_of_names_in_select_header) do
+          """
+          #{if i > 0, do: "    ", else: ""}{
+                select (?relation as #{name}) {
+                  include %relations  
+                }
+              }
+          """ 
+          end
+        }<<<no-newline
+      }
+      order by #{joined_list_of_names_in_select_header}
+      offset #{offset}
+      limit #{limit}
+    } as %relations_
+    where {
+      include %relations_
+      #{core}
+    }
+    group by #{joined_list_of_names_in_select_header}
+    order by desc(?count)
+    """ |> String.replace("\n<<<no-newline", "")
+
+    case output do
+      nil -> unless silent do IO.puts(query) end
+      _ -> case File.open(output, [:write]) do
+        {:ok, file} -> 
+          IO.binwrite(file, query)
+          File.close(file)
+        {:error, error} -> raise "Cannot open file #{output} for writing: #{error}"
+      end
+    end
+
+    query
   end
 end
 
